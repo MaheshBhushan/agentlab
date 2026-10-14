@@ -1,5 +1,8 @@
 """Normalized outputs shared by every runner; evidence quotes must be verbatim."""
 from dataclasses import asdict, dataclass, field
+from datetime import date
+from decimal import Decimal, InvalidOperation
+import re
 from typing import Any
 
 TASKS = ("invoice_triage", "document_question", "meeting_followup")
@@ -38,6 +41,13 @@ class ActionItem:
             raise ValueError("invalid action item fields")
         if not isinstance(raw["evidence"], list):
             raise ValueError("action evidence must be a list")
+        if raw["due_date"] is not None:
+            try:
+                if not isinstance(raw["due_date"], str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", raw["due_date"]):
+                    raise ValueError
+                date.fromisoformat(raw["due_date"])
+            except ValueError as exc:
+                raise ValueError("due_date must be an ISO calendar date or null") from exc
         return cls(_text(raw["description"], "description"), _text(raw["owner"], "owner", True),
                    _text(raw["due_date"], "due_date", True), [Evidence.from_dict(x) for x in raw["evidence"]])
 
@@ -71,6 +81,13 @@ class TaskOutput:
                 raise ValueError("invalid invoice fields")
             for key in ("invoice_number", "supplier", "amount_eur"):
                 _text(invoice[key], key, True)
+            if invoice["amount_eur"] is not None:
+                try:
+                    amount = Decimal(invoice["amount_eur"])
+                    if not re.fullmatch(r"\d+\.\d{2}", invoice["amount_eur"]) or not amount.is_finite() or amount <= 0:
+                        raise InvalidOperation
+                except InvalidOperation as exc:
+                    raise ValueError("amount_eur must be a positive decimal string with two places") from exc
             if invoice["decision"] not in ("ready_for_review", "hold"):
                 raise ValueError("invalid invoice decision")
         for reason in raw["review_reasons"]:
