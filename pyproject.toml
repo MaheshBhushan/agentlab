@@ -6,7 +6,7 @@ build-backend = "hatchling.build"
 name = "agentlab"
 version = "0.1.0"
 description = "Reproducible construction-office agent evaluation"
-requires-python = ">=3.12"
+requires-python = ">=3.12,<3.14"
 dependencies = []
 
 [project.scripts]
@@ -14,3 +14,9 @@ agentlab = "agentlab.cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/agentlab"]
+
+[project.optional-dependencies]
+langchain = ["langchain>=1,<2", "langchain-openai>=1,<2"]
+autogen = ["autogen-agentchat>=0.7,<0.8", "autogen-ext[openai]>=0.7,<0.8"]
+crewai = ["crewai>=1,<2"]
+nemo = ["nemoguardrails>=0.24.1,<0.25", "langchain-openai>=1,<2"]
