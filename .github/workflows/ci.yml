@@ -1,0 +1,28 @@
+name: Core checks
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  core:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: '3.12'
+      - run: uv sync --frozen
+      - run: uv run python -m unittest discover -s tests -v
+      - run: uv run agentlab list
+      - run: uv run agentlab run invoice_complete
+      - run: uv run agentlab evaluate --output artifacts/ci-baseline
+      - run: uv run agentlab report artifacts/ci-baseline/results.json
+      - run: uv build
+      - name: Verify installed package outside checkout
+        run: |
+          uv venv /tmp/agentlab-smoke --python 3.12
+          uv pip install --python /tmp/agentlab-smoke/bin/python dist/*.whl
+          cd /tmp
+          /tmp/agentlab-smoke/bin/agentlab list
+          /tmp/agentlab-smoke/bin/agentlab run invoice_complete
