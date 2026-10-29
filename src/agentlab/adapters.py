@@ -4,12 +4,18 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 import json
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import tempfile
 from typing import Any
 
 from .models import TaskOutput
 from .tasks import TaskRequest, request_messages
 
-ADAPTERS = ("baseline", "langchain", "autogen", "crewai")
+ADAPTERS = ("baseline", "langchain", "autogen", "crewai", "openclaw")
+OPENCLAW_TIMEOUT = 60
 
 
 class AdapterError(RuntimeError):
@@ -94,6 +100,70 @@ def _crewai(request: TaskRequest, model: str) -> AdapterResult:
                          _usage(usage, "completion_tokens"))
 
 
+def openclaw_binary() -> str | None:
+    return os.environ.get("AGENTLAB_OPENCLAW_BIN") or shutil.which("openclaw")
+
+
+def openclaw_version() -> str | None:
+    binary = openclaw_binary()
+    if not binary:
+        return None
+    try:
+        done = subprocess.run([binary, "--version"], capture_output=True, text=True, timeout=30,
+                              env={"PATH": os.environ.get("PATH", ""), "NO_COLOR": "1"})
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return done.stdout.strip() or None
+
+
+def _openclaw_config(model: str) -> dict:
+    """Pinned run config: one OpenAI-compatible model and no model-visible tools."""
+    return {
+        "models": {"providers": {"agentlab": {
+            "baseUrl": os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1"),
+            # OpenClaw resolves the key from the run environment; it never enters argv or the file.
+            "apiKey": "${OPENAI_API_KEY}", "api": "openai-completions",
+            "models": [{"id": model, "name": model, "reasoning": False, "input": ["text"],
+                        "contextWindow": 128000, "maxTokens": 4096}]}}},
+        "tools": {"profile": "minimal", "deny": ["*"], "toolSearch": False, "codeMode": False,
+                  "exec": {"mode": "deny"}, "fs": {"workspaceOnly": True}},
+    }
+
+
+def _openclaw(request: TaskRequest, model: str) -> AdapterResult:
+    binary = openclaw_binary()
+    if not binary:
+        raise AdapterError("openclaw CLI unavailable; install it with npm install -g openclaw")
+    messages = request_messages(request)
+    model = model.removeprefix("openai:")
+    # agent exec has no system-message input; the shared instruction leads the prompt.
+    prompt = f"{messages[0]['content']}\n\n{messages[1]['content']}"
+    with tempfile.TemporaryDirectory(prefix="agentlab-openclaw-") as root:
+        home, workspace = Path(root, "home"), Path(root, "workspace")
+        home.mkdir()
+        workspace.mkdir()
+        config = Path(root, "openclaw.json")
+        config.write_text(json.dumps(_openclaw_config(model)), encoding="utf-8")
+        # A fresh HOME hides operator config, plugins and stored logins from the run.
+        env = {"PATH": os.environ.get("PATH", ""), "HOME": str(home), "NO_COLOR": "1",
+               "OPENAI_API_KEY": os.environ.get("OPENAI_API_KEY", "")}
+        done = subprocess.run(
+            [binary, "agent", "exec", "--config", str(config), "--cwd", str(workspace),
+             "--model", f"agentlab/{model}", "--thinking", "off",
+             "--timeout", str(OPENCLAW_TIMEOUT), "--json", "--message-file", "-"],
+            input=prompt, capture_output=True, text=True, env=env, cwd=workspace,
+            timeout=OPENCLAW_TIMEOUT + 30)
+    try:
+        envelope = json.loads(done.stdout)
+    except ValueError:
+        raise AdapterError(f"openclaw exited {done.returncode} without a JSON result") from None
+    if envelope.get("status") != "ok" or not isinstance(envelope.get("final"), str):
+        kind = (envelope.get("error") or {}).get("kind") or envelope.get("status")
+        raise AdapterError(f"openclaw run failed ({kind})")
+    usage = envelope.get("usage") or {}
+    return AdapterResult(_parse(envelope["final"], request), _usage(usage, "input"), _usage(usage, "output"))
+
+
 def run_adapter(name: str, request: TaskRequest, model: str = "gpt-4o-mini") -> AdapterResult:
     """Run one request. Framework failures never fall back to the offline baseline."""
     if name not in ADAPTERS:
@@ -111,7 +181,9 @@ def run_adapter(name: str, request: TaskRequest, model: str = "gpt-4o-mini") -> 
             except RuntimeError:
                 return asyncio.run(_autogen_async(request, model))
             raise AdapterError("autogen synchronous runner requires a thread outside the active event loop")
-        return _crewai(request, model)
+        if name == "crewai":
+            return _crewai(request, model)
+        return _openclaw(request, model)
     except ImportError as exc:
         raise AdapterError(f"{name} dependency unavailable; install agentlab[{name}]") from exc
     except AdapterError:

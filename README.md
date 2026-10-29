@@ -1,6 +1,6 @@
 # AgentLab
 
-AgentLab evaluates three construction-office workflows with a shared synthetic German corpus: invoice triage, questions about project documents, and meeting follow-up. It provides a deterministic offline baseline and optional LangChain, AutoGen, CrewAI, and NVIDIA NeMo Guardrails integrations.
+AgentLab evaluates three construction-office workflows with a shared synthetic German corpus: invoice triage, questions about project documents, and meeting follow-up. It provides a deterministic offline baseline and optional LangChain, AutoGen, CrewAI, OpenClaw, and NVIDIA NeMo Guardrails integrations.
 
 The CLI proposes decisions for human review. It never pays invoices, sends messages, or changes project records. The 12-case corpus exercises normal inputs, missing and conflicting information, ambiguous follow-up, and prompt injection. It supports a reproducible demonstration; it cannot establish a general framework ranking.
 
@@ -40,6 +40,8 @@ uv sync --extra langchain
 # Or: uv sync --extra nemo
 ```
 
+OpenClaw is a Node.js CLI rather than a Python extra. Install it separately with `npm install -g openclaw@2026.10.9` (Node 24.22.1+ or 26.12.1+), or point `AGENTLAB_OPENCLAW_BIN` at the binary. The adapter runs one `openclaw agent exec` turn per case with a pinned config, a fresh temporary home and workspace, and no model-visible tools.
+
 A credential-dependent example:
 
 ```sh
@@ -48,7 +50,7 @@ uv run agentlab evaluate --mode live --adapter langchain --model gpt-4o-mini --o
 
 Use a fresh output directory for each run. Repeat `--adapter` to compare frameworks in one live evaluation, and use `--repetitions N` for repeated attempts. `--guard none|builtin|nemo` selects the guard engine. `--input-price` and `--output-price` accept user-supplied prices per million tokens; `--currency` labels the result. The default run uses `--mode offline --adapter baseline --guard builtin`.
 
-The initial adapters use OpenAI clients and a selected model. Set `OPENAI_API_KEY` in your shell or secret manager. `.env.example` documents the variable; AgentLab does not automatically load `.env` files. Optional SDKs can require network access and incur provider charges. Run metadata records resolved SDK versions.
+The adapters use OpenAI clients and a selected model. Set `OPENAI_API_KEY` in your shell or secret manager. The OpenClaw adapter also honors `OPENAI_BASE_URL` for an OpenAI-compatible endpoint. `.env.example` documents the variable; AgentLab does not automatically load `.env` files. Optional SDKs can require network access and incur provider charges. Run metadata records resolved SDK versions.
 
 ## Guardrails and evaluation
 
@@ -66,6 +68,6 @@ All shipped records are synthetic. Do not infer performance on production constr
 uv build
 ```
 
-CI runs the core suite and CLI smoke checks on Python 3.12, builds the wheel, and exercises the installed CLI outside the checkout. Installed-SDK smoke checks exercised all four integrations with controlled responses, including real NeMo input/output rails. These checks made no authenticated provider requests. See [integration verification](docs/INTEGRATIONS.md) for versions and reproduction commands. Optional provider tests require credentials. See [the detailed implementation plan](docs/IMPLEMENTATION_PLAN.md) for contracts, methodology, acceptance gates, and the delivery record.
+CI runs the core suite and CLI smoke checks on Python 3.12, builds the wheel, and exercises the installed CLI outside the checkout. Installed-SDK smoke checks exercised all five integrations with controlled responses, including real NeMo input/output rails and the real OpenClaw CLI against a local controlled endpoint. These checks made no authenticated provider requests. See [integration verification](docs/INTEGRATIONS.md) for versions and reproduction commands. Optional provider tests require credentials. See [the detailed implementation plan](docs/IMPLEMENTATION_PLAN.md) for contracts, methodology, acceptance gates, and the delivery record.
 
 MIT License. Copyright 2026 Koduri Mahesh Bhushan Chowdary.

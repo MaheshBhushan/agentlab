@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 import sys
 
-from .adapters import ADAPTERS
+from .adapters import ADAPTERS, openclaw_binary
 from .evaluation import Pricing, evaluate
 from .fixtures import load_cases
 from .reporting import markdown_report, write_artifacts, write_text_exclusive
@@ -34,6 +34,8 @@ def _preflight(args, adapters):
         for module in modules.get(adapter, ()):
             if find_spec(module) is None:
                 raise ValueError(f'{adapter} dependency unavailable; install agentlab[{adapter}]')
+    if 'openclaw' in adapters and not openclaw_binary():
+        raise ValueError('openclaw CLI unavailable; install it with npm install -g openclaw')
     if args.guard == 'nemo' and find_spec('nemoguardrails') is None:
         raise ValueError('nemo dependency unavailable; install agentlab[nemo]')
     if not os.environ.get('OPENAI_API_KEY'):

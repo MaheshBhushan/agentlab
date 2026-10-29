@@ -27,6 +27,22 @@ tools, delegation, memory or cache. Provider timeouts are 60 seconds. LangChain
 and AutoGen disable provider retries; CrewAI disables agent error retries and
 limits iterations. SDKs can still perform internal calls.
 
+OpenClaw runs as a subprocess: `openclaw agent exec --config <pinned> --cwd
+<empty workspace> --model agentlab/<model> --thinking off --timeout 60 --json
+--message-file -`. The adapter writes a config with one OpenAI-compatible provider
+(`OPENAI_BASE_URL`, default `https://api.openai.com/v1`) and a tool policy of
+`profile: minimal`, `deny: ["*"]`, Tool Search and Code Mode off, exec denied and
+filesystem tools limited to the workspace. The run gets a fresh temporary `HOME`
+and a minimal environment (`PATH`, `HOME`, `NO_COLOR`, `OPENAI_API_KEY`), so
+operator config, plugins and stored logins stay out of it. The API key reaches
+OpenClaw through the environment, never through argv or the config file. The
+prompt arrives on stdin. `agent exec` has no system-message input, so the shared
+instruction and the request JSON form one user message after OpenClaw's own
+system prompt. OpenClaw sends no temperature setting. Token counts come from the
+JSON envelope's `usage`. Non-`ok` envelopes and unparseable output become
+`AdapterError`s that name only the failure kind. Each evaluation records the
+`openclaw --version` output in `dependency_versions`.
+
 `check_input(request, engine, model)` and `check_output(request, output, engine,
 model)` return explicit allow, review or block decisions with traceable reasons.
 The evaluator records these decisions and routes flagged cases to human review.
@@ -56,6 +72,7 @@ All extras resolved and installed together in one Python 3.12.13 environment on
 | autogen-ext | 0.7.5 |
 | crewai | 1.15.28 |
 | nemoguardrails | 0.24.1 |
+| openclaw (npm, Node 26.12.1) | 2026.10.9 |
 
 `tests/test_integrations.py` uses local fake SDK modules to check wrapper
 arguments, common messages, cleanup, error handling, token counts, benign
@@ -65,7 +82,9 @@ controls and malicious inputs. These checks need no SDK installation.
 responses. It executes LangChain's real agent graph with a fake chat model,
 AutoGen's real assistant with its replay client, CrewAI's real agent/task/crew
 with a controlled `BaseLLM`, and NeMo's real configuration and self-check flows
-with a controlled LangChain LLM. NeMo input and output flows both pass with a
+with a controlled LangChain LLM. The OpenClaw check runs the installed CLI
+against a local streaming chat-completions server and asserts the parsed output,
+reported token counts, the bearer placeholder, and an empty tool list. NeMo input and output flows both pass with a
 `No` response and block with a `Yes` response. A separate construction check uses
 placeholder credentials without invoking providers. This evidence validates SDK
 plumbing. It does not validate provider responses or model-based rail quality.
@@ -76,6 +95,18 @@ Run installed-SDK checks after installing all extras:
 AGENTLAB_SDK_SMOKE=1 CREWAI_TELEMETRY_DISABLED=true OTEL_SDK_DISABLED=true \
   uv run --all-extras python -m unittest discover -s tests -p test_sdk_smoke.py -v
 ```
+
+The OpenClaw smoke check runs when `openclaw` is on `PATH` or
+`AGENTLAB_OPENCLAW_BIN` names it, and skips otherwise.
+
+On 2026-10-29 the full 12-case corpus ran through `agentlab evaluate --mode live
+--adapter openclaw` with OpenClaw 2026.10.9 against a local controlled endpoint
+that answered each request with the offline baseline's output. Results matched
+the offline baseline: 9 of 12 cases passed, the builtin input guard blocked all
+3 injection cases before OpenClaw ran, and every request reached the endpoint
+with an empty tool list. Mean latency was 9.9 seconds per case, almost all of it
+OpenClaw startup and cleanup. This run validates the subprocess, config, usage
+and grading path. It says nothing about OpenClaw's behavior with a real model.
 
 No authenticated provider requests were made during verification. Framework
 quality, live token reporting, production security and comparative model results

@@ -12,7 +12,7 @@ from statistics import mean, median
 from time import perf_counter
 from uuid import uuid4
 
-from .adapters import ADAPTERS, run_adapter
+from .adapters import ADAPTERS, openclaw_version, run_adapter
 from .guards import check_input, check_output
 from .models import TaskOutput
 from .tasks import build_request, request_messages
@@ -89,8 +89,8 @@ def _cost(inputs, outputs, pricing):
     return str((inputs * pricing.input_per_million + outputs * pricing.output_per_million) / Decimal(1_000_000))
 
 
-def _versions() -> dict:
-    result = {}
+def _versions(adapters: tuple[str, ...]) -> dict:
+    result = {"openclaw": openclaw_version()} if "openclaw" in adapters else {}
     for name in ("agentlab", "langchain", "langchain-openai", "autogen-agentchat", "autogen-ext", "crewai", "nemoguardrails"):
         try:
             result[name] = version(name)
@@ -189,7 +189,7 @@ def evaluate(cases: list[dict], *, adapters: tuple[str, ...] = ("baseline",), mo
     report = {"schema_version": 1, "run_id": run_id, "created_at": datetime.now(timezone.utc).isoformat(),
               "corpus_digest": digest(public), "fixture_digest": digest(cases), "fixture_count": len(cases), "mode": mode,
               "guard_engine": guard, "model": None if mode == "offline" else model,
-              "repetitions": repetitions, "dependency_versions": _versions(),
+              "repetitions": repetitions, "dependency_versions": _versions(adapters),
               "pricing": None if pricing is None else {"input_per_million": str(pricing.input_per_million),
                   "output_per_million": str(pricing.output_per_million), "currency": pricing.currency,
                   "source": "user-provided; no current price verification"},

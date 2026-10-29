@@ -87,6 +87,42 @@ class FakeSDKContracts(unittest.TestCase):
         self.assertFalse(calls["agent"]["allow_delegation"])
         self.assertTrue(calls["kickoff"])
 
+    def test_openclaw_runs_pinned_toolless_exec_in_fresh_home(self):
+        calls = {}
+        def run(argv, **kwargs):
+            config = json.loads(open(argv[argv.index("--config") + 1], encoding="utf-8").read())
+            calls.update(argv=argv, config=config, **kwargs)
+            envelope = {"ok": True, "status": "ok", "final": RAW, "usage": {"input": 30, "output": 9}}
+            return NS(returncode=0, stdout=json.dumps(envelope), stderr="")
+        with patch("agentlab.adapters.openclaw_binary", return_value="/opt/openclaw"), \
+             patch("agentlab.adapters.subprocess.run", run), \
+             patch.dict("os.environ", {"OPENAI_API_KEY": "sk-not-for-argv", "HOME": "/home/operator"}):
+            result = run_adapter("openclaw", REQUEST, model="openai:gpt-4o-mini")
+        self.assertEqual(result.output, OUTPUT)
+        self.assertEqual((result.input_tokens, result.output_tokens), (30, 9))
+        argv = calls["argv"]
+        self.assertEqual(argv[:3], ["/opt/openclaw", "agent", "exec"])
+        self.assertEqual(argv[argv.index("--model") + 1], "agentlab/gpt-4o-mini")
+        self.assertNotIn("sk-not-for-argv", " ".join(argv) + json.dumps(calls["config"]))
+        self.assertEqual(calls["env"]["OPENAI_API_KEY"], "sk-not-for-argv")
+        self.assertNotEqual(calls["env"]["HOME"], "/home/operator")
+        self.assertEqual(calls["config"]["tools"]["deny"], ["*"])
+        self.assertFalse(calls["config"]["tools"]["toolSearch"])
+        messages = request_messages(REQUEST)
+        self.assertEqual(calls["input"], messages[0]["content"] + "\n\n" + messages[1]["content"])
+
+    def test_openclaw_failures_are_explicit(self):
+        failed = json.dumps({"ok": False, "status": "error", "error": {"kind": "provider", "message": "key sk-x"}})
+        for stdout, pattern in ((failed, r"openclaw run failed \(provider\)"), ("boom", "without a JSON result")):
+            with patch("agentlab.adapters.openclaw_binary", return_value="/opt/openclaw"), \
+                 patch("agentlab.adapters.subprocess.run", return_value=NS(returncode=1, stdout=stdout, stderr="")):
+                with self.assertRaisesRegex(AdapterError, pattern) as error:
+                    run_adapter("openclaw", REQUEST)
+            self.assertNotIn("sk-x", str(error.exception))
+        with patch("agentlab.adapters.openclaw_binary", return_value=None):
+            with self.assertRaisesRegex(AdapterError, "openclaw CLI unavailable"):
+                run_adapter("openclaw", REQUEST)
+
     def test_missing_extra_and_invalid_json_are_explicit(self):
         with patch.dict(sys.modules, {"langchain.agents": None}):
             with self.assertRaisesRegex(AdapterError, r"install agentlab\[langchain\]"):
